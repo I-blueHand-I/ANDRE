@@ -1,0 +1,9 @@
+PySide6>=6.5.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# Phase 4 (MP4 support)
+opencv-python>=4.8.0
+
+# Phase 5 (MIDI)
+python-rtmidi>=1.5.0
