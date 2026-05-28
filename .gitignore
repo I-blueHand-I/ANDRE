@@ -1,0 +1,32 @@
+# Virtual environments
+venv/
+venv_windows/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# User config (contains local paths and MIDI bindings)
+config.json
+
+# PyInstaller build output
+build/
+dist/
+*.spec
+pyi_rth_cv2_fix.py
+
+# macOS build assets
+ANDRE.icns
+ANDRE.ico
+ANDRE.iconset/
+
+# Design assets (large binaries)
+*.ai
+*.pdf
+
+# Claude Code local settings
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
