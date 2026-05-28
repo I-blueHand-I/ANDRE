@@ -1,0 +1,32 @@
+{
+  "_comment": "SendPix3 — fichier de thème. Modifier les valeurs hex pour changer l'apparence.",
+
+  "accent":            "#E0C073",
+
+  "bg_darkest":        "#111111",
+  "bg_dark":           "#1a1a1a",
+  "bg_main":           "#000000",
+  "bg_panel":          "#252525",
+  "bg_button":         "#333333",
+  "bg_button_hover":   "#444444",
+  "bg_button_active":  "#555555",
+
+  "border":            "#666666",
+
+  "text":              "#E0C073",
+  "text_muted":        "#aaaaaa",
+  "text_dim":          "#888888",
+  "text_fps":          "#cc2222",
+
+  "deck_a":            "#881111",
+  "deck_a_hover":      "#aa2222",
+  "deck_a_bright":     "#cc2222",
+  "deck_b":            "#116611",
+  "deck_b_hover":      "#228822",
+  "deck_b_bright":     "#22aa22",
+
+  "tab_active":        "#2d7a4f",
+  "tab_inactive":      "#1a4d32",
+  "tab_hover":         "#3d9966",
+  "tab_border":        "#4dcc88"
+}

@@ -1,0 +1,19 @@
+{
+  "led_resolution": [21, 16],
+  "udp_port": 37020,
+  "udp_address": "255.255.255.255",
+  "animations_folder": "",
+  "mp4_folder": "",
+  "midi_device": "",
+  "midi_bindings": {},
+  "key_bindings": {},
+  "palette": [
+    "#4657FF",
+    "#97FF45",
+    "#59FF54",
+    "#F4FFFC",
+    "#FF00FF",
+    "#6188FF"
+  ],
+  "interpolation": "BICUBIC"
+}
