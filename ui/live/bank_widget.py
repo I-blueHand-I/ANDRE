@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QScrollArea, QGridLayout, QFrame
+    QPushButton, QScrollArea, QGridLayout, QFrame, QLineEdit
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QPixmap
@@ -58,8 +58,23 @@ class _BankWidget(QWidget):
         self._btn_list_view.setStyleSheet(_TOGGLE_BTN)
         self._btn_list_view.clicked.connect(lambda: self._set_view_mode("list"))
 
+        self._search_bar = QLineEdit()
+        self._search_bar.setPlaceholderText("Search…")
+        self._search_bar.setClearButtonEnabled(True)
+        self._search_bar.setFixedHeight(22)
+        self._search_bar.setStyleSheet("""
+            QLineEdit {
+                background: #2a2a2a; color: #cccccc;
+                border: 1px solid #555; padding: 0 4px;
+                font-family: 'terminal grotesque'; font-size: 11px;
+            }
+            QLineEdit:focus { border-color: #888; }
+        """)
+        self._search_bar.textChanged.connect(self._apply_filter)
+
         header.addWidget(self._btn_icon_view)
         header.addWidget(self._btn_list_view)
+        header.addWidget(self._search_bar)
 
         refresh_btn = QPushButton("↺")
         refresh_btn.setFixedSize(24, 22)
@@ -140,10 +155,7 @@ class _BankWidget(QWidget):
         self._view_mode = mode
         self._btn_icon_view.setChecked(mode == "icon")
         self._btn_list_view.setChecked(mode == "list")
-        # Rebuild from cache — no re-scan, no disk I/O
-        self._rebuild_content()
-        if self._cached_animations:
-            self._populate_widgets_batched(self._cached_animations)
+        self._apply_filter()
 
     def _rebuild_content(self):
         self._pop_gen += 1   # cancel any in-flight batched populate
@@ -276,13 +288,23 @@ class _BankWidget(QWidget):
             return
 
         self._cached_animations = animations
+        self._apply_filter()
+
+    def _apply_filter(self):
+        query = self._search_bar.text().strip().lower()
+        filtered = (
+            [a for a in self._cached_animations if query in a.name.lower()]
+            if query else list(self._cached_animations)
+        )
         self._rebuild_content()
-
-        if not animations:
-            self._add_placeholder("Aucune animation trouvée")
-            return
-
-        self._populate_widgets_batched(animations)
+        if not filtered:
+            msg = "Aucun résultat" if query else (
+                "Aucune animation trouvée" if self._mode != "video"
+                else "Aucune vidéo trouvée"
+            )
+            self._add_placeholder(msg)
+        else:
+            self._populate_widgets_batched(filtered)
 
     # ── Preview hover ─────────────────────────────────────────────────────────
 
