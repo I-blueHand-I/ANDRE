@@ -51,10 +51,6 @@ class PixelCanvas(QWidget):
         self._onion_enabled = v
         self.update()
 
-    def set_onion_frame(self, arr: np.ndarray | None):
-        self._onion_frame = arr
-        self.update()
-
     def on_frame_selected(self, _i: int, arr: np.ndarray, prev: np.ndarray | None = None):
         W, H = self._resolution()
         if arr.shape == (H, W, 3):
@@ -149,32 +145,24 @@ class PixelCanvas(QWidget):
 
         painter.fillRect(0, 0, w, h, QColor("#111111"))
 
-        # ── Onion skin (dessiné avant la frame courante) ──────────────────────
+        # ── Frame courante ────────────────────────────────────────────────────
+        arr = np.ascontiguousarray(self._pixels)
+        img = QImage(arr.data, W, H, W * 3, QImage.Format_RGB888)
+        painter.drawImage(QRect(0, 0, w, h), img)
+
+        # ── Onion skin (drawn on top of the current frame) ───────────────────
         if self._onion_enabled and self._onion_frame is not None:
             onion = self._onion_frame
             lit   = onion.any(axis=2)
             if lit.any():
                 tinted = np.zeros((H, W, 4), dtype=np.uint8)
-                tinted[lit, 0] = np.minimum(255, onion[lit, 0].astype(np.int16) + 80)
+                tinted[lit, 0] = (onion[lit, 0].astype(np.float32) * 0.25).astype(np.uint8)
                 tinted[lit, 1] = (onion[lit, 1].astype(np.float32) * 0.25).astype(np.uint8)
-                tinted[lit, 2] = (onion[lit, 2].astype(np.float32) * 0.25).astype(np.uint8)
-                tinted[lit, 3] = 160
+                tinted[lit, 2] = np.minimum(255, onion[lit, 2].astype(np.int16) + 80)
+                tinted[lit, 3] = 153
                 tc = np.ascontiguousarray(tinted)
                 painter.drawImage(QRect(0, 0, w, h),
                                   QImage(tc.data, W, H, W * 4, QImage.Format_RGBA8888))
-
-        # ── Frame courante (pixels noirs transparents si onion actif) ─────────
-        arr = np.ascontiguousarray(self._pixels)
-        if self._onion_enabled and self._onion_frame is not None:
-            curr_rgba = np.zeros((H, W, 4), dtype=np.uint8)
-            lit_curr  = arr.any(axis=2)
-            curr_rgba[lit_curr, :3] = arr[lit_curr]
-            curr_rgba[lit_curr, 3]  = 255
-            cc = np.ascontiguousarray(curr_rgba)
-            img = QImage(cc.data, W, H, W * 4, QImage.Format_RGBA8888)
-        else:
-            img = QImage(arr.data, W, H, W * 3, QImage.Format_RGB888)
-        painter.drawImage(QRect(0, 0, w, h), img)
 
         # ── Grille ────────────────────────────────────────────────────────────
         pen = QPen(QColor("#2e2e2e"))

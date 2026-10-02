@@ -109,30 +109,33 @@ class MidiManager(QThread):
         if len(data) < 3:
             return
         status = data[0] & 0xF0
+        channel = data[0] & 0x0F
 
         if status == 0xB0:                           # CC
-            midi_key = f"CC_{data[1]}"
+            base_key = f"CC_{data[1]}"
             norm_val = data[2] / 127.0
         elif status == 0x90:                         # Note On (vel=0 → Note Off)
-            midi_key = f"NOTE_{data[1]}"
+            base_key = f"NOTE_{data[1]}"
             norm_val = 1.0 if data[2] > 0 else 0.0
         elif status == 0x80:                         # Note Off
-            midi_key = f"NOTE_{data[1]}"
+            base_key = f"NOTE_{data[1]}"
             norm_val = 0.0
         else:
             return
+
+        chan_key = f"{base_key}_CH{channel}"
 
         if self._learn_target:
             old_key = self._bindings.get(self._learn_target)
             if old_key:
                 self._reverse.pop(old_key, None)
-            self._bindings[self._learn_target] = midi_key
-            self._reverse[midi_key] = self._learn_target
-            self.learn_bound.emit(self._learn_target, midi_key)
+            self._bindings[self._learn_target] = chan_key
+            self._reverse[chan_key] = self._learn_target
+            self.learn_bound.emit(self._learn_target, chan_key)
             self._learn_target = ""
             self._save_bindings()
             return
 
-        control = self._reverse.get(midi_key)
+        control = self._reverse.get(chan_key) or self._reverse.get(base_key)
         if control:
             self.midi_value.emit(control, norm_val)

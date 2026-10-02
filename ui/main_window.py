@@ -21,7 +21,6 @@ from output.udp_output import UDPOutput
 from midi.midi_manager import MidiManager
 from engine.constants import SIDE_A, SIDE_B
 
-_BLEND_NAMES = list(BLEND_MODES.keys())
 
 
 def _midi_range(v: float, lo: int, hi: int) -> int:
@@ -115,6 +114,8 @@ class MainWindow(QMainWindow):
         # Mixette → moteur
         self.mixette_tab.rgb_changed.connect(self.render_engine.set_rgb)
         self.mixette_tab.hsv_changed.connect(self.render_engine.set_hsv)
+        self.mixette_tab.contrast_changed.connect(self.render_engine.set_contrast)
+        self.mixette_tab.brightness_changed.connect(self.render_engine.set_brightness)
 
         # Edit live
         self.edit_tab.live_edit_deck_changed.connect(self._on_edit_live_deck)
@@ -217,7 +218,6 @@ class MainWindow(QMainWindow):
     def _setup_midi_callbacks(self):
         re  = self.render_engine
         lt  = self.live_tab
-        _nb = len(_BLEND_NAMES) - 1
 
         def _set_rgb(ch, v):
             self._midi_rgb[ch] = v
@@ -235,25 +235,42 @@ class MainWindow(QMainWindow):
             "RED":         lambda v: _set_rgb(0, v),
             "GREEN":       lambda v: _set_rgb(1, v),
             "BLUE":        lambda v: _set_rgb(2, v),
-            "HUE":         lambda v: _set_hsv(1, 360.0, v),
-            "SATURATION":  lambda v: _set_hsv(2, 1.0, v),
-            "VALUE":       lambda v: _set_hsv(3, 1.0, v),
-            "STROBE_R":    lambda v: _set_strobe(0, v),
-            "STROBE_G":    lambda v: _set_strobe(1, v),
-            "STROBE_B":    lambda v: _set_strobe(2, v),
-            "STROBE_FREQ": lambda v: re.set_strobe_freq(_midi_range(v, 1, 30)),
+            "HUE":         lambda v: (_set_hsv(1, 360.0, v), self.mixette_tab._hsv_panel._slider_h.setValue(int(v * 360))),
+            "SATURATION":  lambda v: (_set_hsv(2, 1.0, v), self.mixette_tab._hsv_panel._slider_s.setValue(int(v * 255))),
+            "VALUE":       lambda v: (_set_hsv(3, 1.0, v), self.mixette_tab._hsv_panel._slider_v.setValue(int(v * 255))),
+            "STROBE_R":    lambda v: (_set_strobe(0, v), lt._strobe_r.setValue(int(v * 255))),
+            "STROBE_G":    lambda v: (_set_strobe(1, v), lt._strobe_g.setValue(int(v * 255))),
+            "STROBE_B":    lambda v: (_set_strobe(2, v), lt._strobe_b.setValue(int(v * 255))),
+            "STROBE_FREQ": lambda v: (re.set_strobe_freq(_midi_range(v, 1, 30)), lt._strobe_freq_slider.setValue(_midi_range(v, 1, 30))),
             "STROBE":      lambda v: lt.set_strobe_active(v > 0.5),
+            "BLACKOUT":    lambda v: lt.set_blackout_active(v > 0.5),
+            "CONTRAST":    lambda v: (re.set_contrast(v), self.mixette_tab._hsv_panel._slider_contrast.setValue(int(v * 255))),
+            "BRIGHTNESS":  lambda v: (re.set_brightness(v), self.mixette_tab._hsv_panel._slider_brightness.setValue(int(v * 255))),
             "CROSSFADER":  lambda v: lt.crossfader.setValue(_midi_range(v, 0, 100)),
             "FPS_A":          lambda v: lt.set_deck_fps(SIDE_A, _midi_range(v, 1, 60)),
             "FPS_B":          lambda v: lt.set_deck_fps(SIDE_B, _midi_range(v, 1, 60)),
-            "BLEND_A":        lambda v: lt.blend_combo_a.setCurrentIndex(_midi_range(v, 0, _nb)),
-            "BLEND_B":        lambda v: lt.blend_combo_b.setCurrentIndex(_midi_range(v, 0, _nb)),
             "PLAY_PAUSE_A":   lambda v: lt.toggle_deck_pause(SIDE_A) if v > 0.5 else None,
             "PLAY_PAUSE_B":   lambda v: lt.toggle_deck_pause(SIDE_B) if v > 0.5 else None,
             "CUE_A":          lambda v: lt.set_cue_active(SIDE_A, v > 0.5),
             "CUE_B":          lambda v: lt.set_cue_active(SIDE_B, v > 0.5),
             "TOGGLE_HUE":  lambda v: self.mixette_tab.set_hue_active(v > 0.5),
+            "RED_A":   lambda v: (lt._deck_r_a.setValue(int(v * 255)),),
+            "GREEN_A": lambda v: (lt._deck_g_a.setValue(int(v * 255)),),
+            "BLUE_A":  lambda v: (lt._deck_b_a.setValue(int(v * 255)),),
+            "SAT_A":   lambda v: (lt._deck_sat_a.setValue(int(v * 255)),),
+            "RED_B":   lambda v: (lt._deck_r_b.setValue(int(v * 255)),),
+            "GREEN_B": lambda v: (lt._deck_g_b.setValue(int(v * 255)),),
+            "BLUE_B":  lambda v: (lt._deck_b_b.setValue(int(v * 255)),),
+            "SAT_B":   lambda v: (lt._deck_sat_b.setValue(int(v * 255)),),
         }
+
+        for mode in BLEND_MODES:
+            self._midi_callbacks[f"BLEND_A_{mode}"] = (
+                lambda v, m=mode: lt.blend_combo_a.setCurrentText(m) if v > 0.5 else None
+            )
+            self._midi_callbacks[f"BLEND_B_{mode}"] = (
+                lambda v, m=mode: lt.blend_combo_b.setCurrentText(m) if v > 0.5 else None
+            )
 
     def _on_midi_value(self, control: str, value: float):
         cb = self._midi_callbacks.get(control)
@@ -282,11 +299,19 @@ class MainWindow(QMainWindow):
             Action.PREV_FRAME:        self.edit_tab.go_prev,
             Action.PREV_FRAME_2:      self.edit_tab.play_backward,
             Action.EXPORT_ANIM:       self.edit_tab.trigger_export,
+            Action.TOOL_BRUSH:        lambda: self.edit_tab._set_tool("brush"),
+            Action.TOOL_FILL:         lambda: self.edit_tab._set_tool("fill"),
+            Action.TOOL_EYEDROPPER:   lambda: self.edit_tab._set_tool("eyedropper"),
         }
         for action, cb in callbacks.items():
             self._keybind_manager.register(action, cb)
 
         # Hold actions: key/MIDI down = on, key/MIDI up = off
+        self._keybind_manager.register_hold(
+            Action.TOOL_ONION,
+            lambda: self.edit_tab.set_onion_active(True),
+            lambda: self.edit_tab.set_onion_active(False),
+        )
         self._keybind_manager.register_hold(
             Action.STROBE,
             lambda: self.live_tab.set_strobe_active(True),
@@ -303,7 +328,18 @@ class MainWindow(QMainWindow):
             lambda: self.live_tab.set_cue_active(SIDE_B, False),
         )
 
-        for action, key in self.config.get("key_bindings", {}).items():
+        _defaults = {
+            Action.TOOL_BRUSH: "B",
+            Action.TOOL_FILL: "G",
+            Action.TOOL_EYEDROPPER: "I",
+            Action.TOOL_ONION: "O",
+        }
+        user_bindings = self.config.get("key_bindings", {})
+        for action, key in _defaults.items():
+            if action not in user_bindings:
+                user_bindings[action] = key
+        self.config.set("key_bindings", user_bindings)
+        for action, key in user_bindings.items():
             self._keybind_manager.update_binding(action, key)
         self.mixette_tab.key_bind_changed.connect(self._keybind_manager.update_binding)
 

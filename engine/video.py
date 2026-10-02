@@ -44,18 +44,15 @@ class Video:
         if not cap.isOpened():
             print(f"Video: impossible d'ouvrir {self.path.name}")
             return
-        self._cap         = cap
         self._frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self._fps_native  = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        self._seek(0)
-        self._preload_preview()
+        self._preload_preview(cap)
+        cap.release()
 
-    def _preload_preview(self):
-        if not _HAS_CV2 or self._frame_count == 0:
+    def _preload_preview(self, cap):
+        if self._frame_count == 0:
             return
-        cap = cv2.VideoCapture(str(self.path))
-        if not cap.isOpened():
-            return
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         count = min(_PREVIEW_MAX_FRAMES, self._frame_count)
         for _ in range(count):
             ret, frame = cap.read()
@@ -64,13 +61,22 @@ class Video:
             rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             small = cv2.resize(rgb, (_PREVIEW_W, _PREVIEW_H), interpolation=cv2.INTER_AREA)
             self._preview_frames.append(small)
-        cap.release()
 
     # ── Lecture ───────────────────────────────────────────────────────────────
 
+    def _ensure_cap(self):
+        if self._cap is None:
+            self._cap = cv2.VideoCapture(str(self.path))
+            if not self._cap.isOpened():
+                self._cap = None
+                return False
+            self._current_idx = -1
+            self._current_frame = None
+        return True
+
     def get_frame(self, index: int) -> np.ndarray:
         with self._lock:
-            if self._cap is None or self._frame_count == 0:
+            if self._frame_count == 0 or not self._ensure_cap():
                 return np.zeros((16, 21, 3), dtype=np.uint8)
 
             target = index % self._frame_count

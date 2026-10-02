@@ -1,10 +1,12 @@
 import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel,
-    QPushButton, QSlider, QSizePolicy, QColorDialog
+    QPushButton, QSlider, QSizePolicy, QColorDialog, QLineEdit
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QColor
+
+from PySide6.QtWidgets import QFileDialog
 
 from ui.edit.canvas import PixelCanvas
 from ui.edit.colorwheel import ColorPicker
@@ -141,9 +143,9 @@ class EditTab(QWidget):
             onion_btn.styleSheet()
             + f"QPushButton:pressed {{ background-color: {ACCENT}; border-color: #ff4499; }}"
         )
-        onion_btn.setToolTip("Onion skin — maintenir O")
-        onion_btn.pressed.connect(lambda: self.canvas.set_onion_enabled(True))
-        onion_btn.released.connect(lambda: self.canvas.set_onion_enabled(False))
+        onion_btn.setToolTip("Onion skin (hold)")
+        onion_btn.pressed.connect(lambda: self.set_onion_active(True))
+        onion_btn.released.connect(lambda: self.set_onion_active(False))
         self._onion_btn = onion_btn
         lay.addWidget(onion_btn)
 
@@ -196,6 +198,10 @@ class EditTab(QWidget):
         lay.addWidget(self.palette, alignment=Qt.AlignHCenter)
 
         lay.addStretch()
+
+        import_btn = _btn("IMPORT ANIM", size=10, pad="4px 8px")
+        import_btn.clicked.connect(self._import_animation)
+        lay.addWidget(import_btn)
 
         settings_btn = _btn("SETTINGS", size=10, pad="4px 8px")
         settings_btn.clicked.connect(self._open_settings)
@@ -367,6 +373,10 @@ class EditTab(QWidget):
         self.canvas.setFocus()
 
     def keyPressEvent(self, event):
+        from PySide6.QtWidgets import QApplication
+        if isinstance(QApplication.focusWidget(), QLineEdit):
+            super().keyPressEvent(event)
+            return
         mods = event.modifiers()
         key  = event.key()
         if mods == Qt.ControlModifier:
@@ -374,34 +384,19 @@ class EditTab(QWidget):
                 self._clipboard = self.timeline.get_frames()[self.timeline.current_index].copy()
             elif key == Qt.Key_V and self._clipboard is not None:
                 self._push_history()
-                if self.timeline.current_index == self.timeline.frame_count - 1:
-                    self.timeline.add_frame(self._clipboard)
-                else:
-                    self.timeline.update_current_frame(self._clipboard.copy())
-                    self.canvas.set_frame(self._clipboard)
+                self.timeline.update_current_frame(self._clipboard.copy())
+                self.canvas.set_frame(self._clipboard)
             elif key == Qt.Key_Z:
                 self._undo()
             elif key == Qt.Key_Y:
                 self._redo()
         elif mods == (Qt.ControlModifier | Qt.ShiftModifier) and key == Qt.Key_Z:
             self._redo()
-        elif mods == Qt.NoModifier:
-            if key == Qt.Key_O and not event.isAutoRepeat():
-                self._onion_btn.setDown(True)
-                self.canvas.set_onion_enabled(True)
-            elif key == Qt.Key_B:
-                self._set_tool("brush")
-            elif key == Qt.Key_G:
-                self._set_tool("fill")
-            elif key == Qt.Key_I:
-                self._set_tool("eyedropper")
         super().keyPressEvent(event)
 
-    def keyReleaseEvent(self, event):
-        if event.key() == Qt.Key_O and not event.isAutoRepeat():
-            self._onion_btn.setDown(False)
-            self.canvas.set_onion_enabled(False)
-        super().keyReleaseEvent(event)
+    def set_onion_active(self, active: bool):
+        self._onion_btn.setDown(active)
+        self.canvas.set_onion_enabled(active)
 
     def _push_history(self):
         self._history.push(self.timeline.get_frames(), self.timeline.current_index)
@@ -460,6 +455,38 @@ class EditTab(QWidget):
 
     def _open_settings(self):
         self.settings_requested.emit()
+
+    def _import_animation(self):
+        from engine.animation import Animation
+        from engine.resize import resize_frame
+
+        start_dir = self.config.get("animations_folder", "")
+        folder = QFileDialog.getExistingDirectory(
+            self, "Importer une animation", start_dir
+        )
+        if not folder:
+            return
+        from pathlib import Path
+        path = Path(folder)
+        if not Animation.is_animation_folder(path):
+            return
+
+        anim = Animation(path)
+        if anim.frame_count == 0:
+            return
+
+        W, H = self.timeline._get_resolution()
+        resized = []
+        for i in range(anim.frame_count):
+            frame = anim.get_frame(i)
+            if frame.shape[1] != W or frame.shape[0] != H:
+                frame = resize_frame(frame, W, H, "NEAREST")
+            resized.append(frame)
+
+        self._push_history()
+        self._stop_playback()
+        self.timeline.load_frames(resized)
+        self._history = History(20)
 
     # ── Live edit deck ────────────────────────────────────────────────────────
 

@@ -158,6 +158,31 @@ class Timeline(QWidget):
         self._add_first_frame()
         self.frame_selected.emit(0, self._frames[0], None)
 
+    def load_frames(self, frames: list[np.ndarray]):
+        """Replace the entire animation with imported frames."""
+        if not frames:
+            return
+        self.state_will_change.emit()
+        self.reset.emit()
+        self._grid.removeWidget(self._add_btn)
+        for thumb in self._thumbs:
+            self._grid.removeWidget(thumb)
+            thumb.setParent(None)
+        self._frames.clear()
+        self._thumbs.clear()
+        self._current = 0
+
+        for i, frame in enumerate(frames):
+            self._frames.append(frame.copy())
+            thumb = _FrameThumb(i, frame, selected=(i == 0))
+            thumb.clicked.connect(self.select)
+            thumb.delete_requested.connect(self.delete_frame)
+            self._grid.addWidget(thumb, *divmod(i, 2))
+            self._thumbs.append(thumb)
+
+        self._refresh_add_btn()
+        self.frame_selected.emit(0, self._frames[0], None)
+
     def select(self, i: int):
         if not (0 <= i < len(self._frames)):
             return

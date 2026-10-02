@@ -38,6 +38,7 @@ Status legend: ✅ fixed — ⏳ pending
 | 11 | ✅ | `ui/main_window.py` | MIDI value mappings scattered. Extracted to `_midi_range(v, lo, hi)` helper. |
 | 37 | ⏳ | `ui/keybind.py` | **CUE actions absent from all registries** — `DECK_A_CUE` and `DECK_B_CUE` are hardcoded in `_make_deck_section`, bypassing the registry pattern every other action uses. Excluded from any future registry-driven feature (conflict detection, reset-all, etc.). |
 | 38 | ⏳ | `ui/keybind.py` | **`NEXT_FRAME_2` / `PREV_FRAME_2` misleading names** — these map to `play_forward` / `play_backward` (jog/shuttle), not a secondary frame-step. Any future developer will assume frame-step semantics from the name. Rename to `JOG_FORWARD` / `JOG_BACKWARD` or similar. |
+| 45 | ⏳ | `ui/edit/edit_tab.py` | **Tool button labels hardcoded as "B", "G", "I"** — display the default keybind letter but won't update if the user rebinds the tools to different keys in Mixette. |
 
 ---
 
@@ -50,6 +51,7 @@ Status legend: ✅ fixed — ⏳ pending
 | 14 | ⏳ | `engine/video.py` lines 78–79 | `if target == self._current_idx: pass` is a no-op branch. |
 | 15 | ⏳ | `engine/deck.py` | `_has_fps_native` is now cached at `load()` (improvement from previous audit), but if every loadable type always has `fps_native`, the flag is always True and the branch is effectively dead. Confirm whether a non-fps-native animation can ever be loaded; if not, remove the guard entirely. |
 | 39 | ⏳ | `engine/deck.py` | **`has_animation` property defined but never called** — no file reads `deck.has_animation`. Either use it or remove it. |
+| 47 | ✅ | `ui/edit/canvas.py` | **`set_onion_frame()` method never called** — orphaned method. Removed. |
 
 ---
 
@@ -69,7 +71,8 @@ Status legend: ✅ fixed — ⏳ pending
 | # | Status | File | Description |
 |---|--------|------|-------------|
 | 20 | ⏳ | `ui/live/bank_widget.py` | Animation bank loads everything into memory at scan time. No lazy loading, no virtual scroll. Will be slow with large libraries. |
-| 21 | ⏳ | `ui/edit/tools.py` + `ui/edit/edit_tab.py` + `ui/keybind.py` | Adding a new draw tool requires editing 3 files. No single registration point. |
+| 46 | ⏳ | `engine/video.py` + `ui/live/bank_items.py` | **MP4 bank scan can exhaust FFmpeg resources** — all videos are loaded sequentially in a tight loop; each `Video._load()` opens a `VideoCapture`, reads preview frames, then closes it. With ~90 videos, rapid open/close can still occasionally trigger `Cannot initialize the conversion context!` if the OS hasn't fully released resources from the previous cap. Fix: add a small delay between loads, or batch the scan with a bounded concurrency (e.g. load N, pause, load N). Cosmetic only — affected videos still play correctly when dragged to a deck (lazy `_ensure_cap`). |
+| 21 | ⏳ | `ui/edit/tools.py` + `ui/edit/edit_tab.py` + `ui/keybind.py` + `ui/main_window.py` | Adding a new draw tool requires editing 4 files (tool logic, UI button, action + registry, callback registration). No single registration point. |
 | 22 | ⏳ | `engine/deck.py` | No `Protocol` / `ABC` for the animation duck-type. Missing a method gives a runtime `AttributeError` instead of a static error. |
 | 23 | ✅ | `ui/main_window.py` | `_first_launch_settings` and `open_settings` almost identical — diverged once already. Merged into `_run_settings_dialog(force_resolution)`. |
 | 40 | ⏳ | `engine/render_engine.py` | **Active-play frames re-resized every tick even when frame index didn't advance** — when a deck plays at 5 fps, the same source frame goes through `resize_frame` 60 times/s. The `_frozen_prev_*` cache only helps when paused. Fix: track last-emitted `_frame_index` per deck; skip resize when index unchanged. |

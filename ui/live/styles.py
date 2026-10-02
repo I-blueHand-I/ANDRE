@@ -114,6 +114,24 @@ QPushButton:pressed {
 }
 """
 
+_BLACKOUT_BTN = """
+QPushButton {
+    background-color: #1a1a1a;
+    color: #888888;
+    border: 1px solid #555555;
+    font-family: 'terminal grotesque', monospace;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+QPushButton:hover { background-color: #2a2a2a; color: #aaaaaa; }
+QPushButton:pressed {
+    background-color: #000000;
+    color: #ffffff;
+    border: 1px solid #ffffff;
+}
+"""
+
 _TARGET_BTN = """
 QPushButton {
     background-color: #222222;

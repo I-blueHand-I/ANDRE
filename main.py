@@ -23,7 +23,7 @@ def _load_fonts():
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("SendPix3")
+    app.setApplicationName("ANDRE")
     app.setOrganizationName("GoldenPixel")
 
     _load_fonts()

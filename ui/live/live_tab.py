@@ -8,7 +8,7 @@ from ui.theme import BG_PANEL as _BG_MAIN, BG_BUTTON as _BG_CTRL, BG_MAIN as _BG
 from engine.blend_modes import BLEND_MODES
 from engine.constants import SIDE_A, SIDE_B
 from ui.shared_styles import _btn
-from ui.live.styles import _VSLIDER, _COMBO, _HSLIDER, _STROBE_BTN, _TOGGLE_BTN, _CUE_BTN
+from ui.live.styles import _VSLIDER, _COMBO, _HSLIDER, _STROBE_BTN, _TOGGLE_BTN, _CUE_BTN, _BLACKOUT_BTN
 from ui.live.deck_preview import DeckPreview, _FpsRuler
 from ui.live.bank_widget import _BankWidget
 from ui.live.crossfader import _CrossfaderSlider
@@ -161,6 +161,16 @@ class LiveTab(QWidget):
         self._cue_btn_a.setStyleSheet(_CUE_BTN)
         left.addWidget(self._cue_btn_a, alignment=Qt.AlignVCenter)
 
+        left.addSpacing(8)
+        self._deck_r_a = _ColorDial("#cc3333"); self._deck_r_a.setValue(255)
+        self._deck_g_a = _ColorDial("#33bb33"); self._deck_g_a.setValue(255)
+        self._deck_b_a = _ColorDial("#3366cc"); self._deck_b_a.setValue(255)
+        self._deck_sat_a = _ColorDial("#bbbbbb"); self._deck_sat_a.setValue(255)
+        left.addWidget(self._deck_r_a, alignment=Qt.AlignVCenter)
+        left.addWidget(self._deck_g_a, alignment=Qt.AlignVCenter)
+        left.addWidget(self._deck_b_a, alignment=Qt.AlignVCenter)
+        left.addWidget(self._deck_sat_a, alignment=Qt.AlignVCenter)
+
         left.addStretch()
 
         center = QHBoxLayout()
@@ -192,6 +202,16 @@ class LiveTab(QWidget):
         right.setSpacing(6)
         right.addStretch()
 
+        self._deck_r_b = _ColorDial("#cc3333"); self._deck_r_b.setValue(255)
+        self._deck_g_b = _ColorDial("#33bb33"); self._deck_g_b.setValue(255)
+        self._deck_b_b = _ColorDial("#3366cc"); self._deck_b_b.setValue(255)
+        self._deck_sat_b = _ColorDial("#bbbbbb"); self._deck_sat_b.setValue(255)
+        right.addWidget(self._deck_sat_b, alignment=Qt.AlignVCenter)
+        right.addWidget(self._deck_b_b, alignment=Qt.AlignVCenter)
+        right.addWidget(self._deck_g_b, alignment=Qt.AlignVCenter)
+        right.addWidget(self._deck_r_b, alignment=Qt.AlignVCenter)
+
+        right.addSpacing(8)
         self._cue_btn_b = QPushButton("CUE")
         self._cue_btn_b.setFixedSize(40, 28)
         self._cue_btn_b.setStyleSheet(_CUE_BTN)
@@ -263,6 +283,13 @@ class LiveTab(QWidget):
         self.strobe_blend_combo.setStyleSheet(_COMBO)
         left.addWidget(self.strobe_blend_combo, alignment=Qt.AlignVCenter)
 
+        left.addSpacing(6)
+
+        self._blackout_btn = QPushButton("BLACKOUT")
+        self._blackout_btn.setFixedWidth(86)
+        self._blackout_btn.setStyleSheet(_BLACKOUT_BTN)
+        left.addWidget(self._blackout_btn, alignment=Qt.AlignVCenter)
+
         left.addStretch()
 
         # ── Contrôles (droite) ────────────────────────────────────────────────
@@ -329,6 +356,24 @@ class LiveTab(QWidget):
         self.blend_combo_a.currentTextChanged.connect(lambda m: re.set_blend_mode(SIDE_A, m))
         self.blend_combo_b.currentTextChanged.connect(lambda m: re.set_blend_mode(SIDE_B, m))
 
+        self._deck_rgb_a = [1.0, 1.0, 1.0]
+        self._deck_rgb_b = [1.0, 1.0, 1.0]
+
+        def _on_deck_rgb(side, ch, val):
+            rgb = self._deck_rgb_a if side == SIDE_A else self._deck_rgb_b
+            rgb[ch] = val / 255.0
+            re.set_deck_rgb(side, *rgb)
+
+        self._deck_r_a.valueChanged.connect(lambda v: _on_deck_rgb(SIDE_A, 0, v))
+        self._deck_g_a.valueChanged.connect(lambda v: _on_deck_rgb(SIDE_A, 1, v))
+        self._deck_b_a.valueChanged.connect(lambda v: _on_deck_rgb(SIDE_A, 2, v))
+        self._deck_r_b.valueChanged.connect(lambda v: _on_deck_rgb(SIDE_B, 0, v))
+        self._deck_g_b.valueChanged.connect(lambda v: _on_deck_rgb(SIDE_B, 1, v))
+        self._deck_b_b.valueChanged.connect(lambda v: _on_deck_rgb(SIDE_B, 2, v))
+
+        self._deck_sat_a.valueChanged.connect(lambda v: re.set_deck_saturation(SIDE_A, v / 255.0))
+        self._deck_sat_b.valueChanged.connect(lambda v: re.set_deck_saturation(SIDE_B, v / 255.0))
+
         self._pause_btn_a.toggled.connect(re.deck_a.set_paused)
         self._pause_btn_b.toggled.connect(re.deck_b.set_paused)
         
@@ -346,6 +391,8 @@ class LiveTab(QWidget):
 
         self._strobe_btn.pressed.connect(lambda: re.set_strobe_active(True))
         self._strobe_btn.released.connect(lambda: re.set_strobe_active(False))
+        self._blackout_btn.pressed.connect(lambda: re.set_blackout(True))
+        self._blackout_btn.released.connect(lambda: re.set_blackout(False))
         self._strobe_freq_slider.valueChanged.connect(re.set_strobe_freq)
         self._strobe_r.valueChanged.connect(self._emit_strobe_color)
         self._strobe_g.valueChanged.connect(self._emit_strobe_color)
@@ -393,6 +440,10 @@ class LiveTab(QWidget):
     def set_strobe_active(self, active: bool):
         self._strobe_btn.setDown(active)
         self._render_engine.set_strobe_active(active)
+
+    def set_blackout_active(self, active: bool):
+        self._blackout_btn.setDown(active)
+        self._render_engine.set_blackout(active)
 
     def cleanup(self):
         self._bank_anim.cleanup()

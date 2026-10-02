@@ -1,6 +1,6 @@
 from typing import NamedTuple
 
-from PySide6.QtWidgets import QApplication, QPushButton, QWidget
+from PySide6.QtWidgets import QApplication, QPushButton, QWidget, QLineEdit
 from PySide6.QtCore import Qt, Signal, QObject, QEvent
 from PySide6.QtGui import QKeySequence
 
@@ -28,6 +28,10 @@ class Action:
     PREV_FRAME    = "PREV_FRAME"
     PREV_FRAME_2  = "PREV_FRAME_2"
     EXPORT_ANIM   = "EXPORT_ANIM"
+    TOOL_BRUSH      = "TOOL_BRUSH"
+    TOOL_FILL       = "TOOL_FILL"
+    TOOL_EYEDROPPER = "TOOL_EYEDROPPER"
+    TOOL_ONION      = "TOOL_ONION"
 
 
 class ActionDef(NamedTuple):
@@ -56,6 +60,13 @@ EDIT_LEFT_REGISTRY: tuple[ActionDef, ...] = (
     ActionDef(Action.NEW_ANIM,     "NEW ANIM"),
     ActionDef(Action.LIVE_EDIT_A,  "LIVE EDIT DECK A"),
     ActionDef(Action.LIVE_EDIT_B,  "LIVE EDIT DECK B"),
+)
+
+EDIT_TOOLS_REGISTRY: tuple[ActionDef, ...] = (
+    ActionDef(Action.TOOL_BRUSH,      "BRUSH"),
+    ActionDef(Action.TOOL_FILL,       "FILL"),
+    ActionDef(Action.TOOL_EYEDROPPER, "EYEDROPPER"),
+    ActionDef(Action.TOOL_ONION,      "ONION SKIN", hold=True),
 )
 
 EDIT_RIGHT_REGISTRY: tuple[ActionDef, ...] = (
@@ -191,6 +202,8 @@ class KeyBindManager(QObject):
         if event.isAutoRepeat():
             return False
         if QWidget.keyboardGrabber() is not None:
+            return False
+        if isinstance(QApplication.focusWidget(), QLineEdit):
             return False
         seq = QKeySequence(event.keyCombination()).toString()
         action = self._key_map.get(seq)

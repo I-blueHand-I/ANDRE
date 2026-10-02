@@ -40,6 +40,10 @@ class RenderEngine(QThread):
         self._blend_mode_b: str = "NORMAL"
 
         self._rgb: tuple[float, float, float]       = (1.0, 1.0, 1.0)
+        self._rgb_a: tuple[float, float, float]     = (1.0, 1.0, 1.0)
+        self._rgb_b: tuple[float, float, float]     = (1.0, 1.0, 1.0)
+        self._sat_a: float = 1.0
+        self._sat_b: float = 1.0
         self._hsv: tuple[bool, float, float, float] = (False, 0.0, 1.0, 1.0)
 
         self._strobe_active:      bool               = False
@@ -48,6 +52,16 @@ class RenderEngine(QThread):
         self._strobe_phase:       float              = 0.0
         self._strobe_vis:         bool               = True
         self._strobe_blend_mode:  str                = "NORMAL"
+
+        self._contrast:           float              = 0.0
+        self._contrast_lut:       np.ndarray | None  = None
+        self._brightness:         float              = 0.0
+        self._brightness_lut:     np.ndarray | None  = None
+
+        self._blackout_target:    bool               = False
+        self._blackout_alpha:     float              = 0.0
+        self._blackout_flash_alpha: float            = 0.0
+        self._blackout_phase:     int                = 0  # 0=idle, 1=flash in, 2=flash out, 3=black in
 
         res = config.get("led_resolution", [21, 16])
         self._resolution: tuple[int, int] = (int(res[0]), int(res[1]))
@@ -80,6 +94,18 @@ class RenderEngine(QThread):
     def set_rgb(self, r: float, g: float, b: float) -> None:
         self._rgb = (r, g, b)
 
+    def set_deck_rgb(self, side: str, r: float, g: float, b: float) -> None:
+        if side == "A":
+            self._rgb_a = (r, g, b)
+        else:
+            self._rgb_b = (r, g, b)
+
+    def set_deck_saturation(self, side: str, sat: float) -> None:
+        if side == "A":
+            self._sat_a = sat
+        else:
+            self._sat_b = sat
+
     def set_hsv(self, hue_on: bool, hue_deg: float,
                 sat_mult: float, val_mult: float) -> None:
         self._hsv = (hue_on, hue_deg, sat_mult, val_mult)
@@ -108,6 +134,34 @@ class RenderEngine(QThread):
     def set_strobe_blend_mode(self, mode: str) -> None:
         self._strobe_blend_mode = mode if mode in BLEND_MODES else "NORMAL"
 
+    def set_contrast(self, value: float) -> None:
+        self._contrast = max(0.0, min(1.0, value))
+        if self._contrast == 0.0:
+            self._contrast_lut = None
+        else:
+            # S-curve via sigmoid: strength maps to steepness (4 = subtle, 20 = hard)
+            k = 4.0 + self._contrast * 16.0
+            x = np.linspace(0, 1, 256, dtype=np.float64)
+            s = 1.0 / (1.0 + np.exp(-k * (x - 0.5)))
+            s = (s - s[0]) / (s[-1] - s[0])
+            self._contrast_lut = (s * 255).astype(np.uint8)
+
+    def set_brightness(self, value: float) -> None:
+        self._brightness = max(0.0, min(1.0, value))
+        if self._brightness == 0.0:
+            self._brightness_lut = None
+        else:
+            # Gamma correction: slider 0→1 maps gamma 1.0→0.25 (brighter)
+            gamma = 1.0 - self._brightness * 0.75
+            x = np.linspace(0, 1, 256, dtype=np.float64)
+            self._brightness_lut = (np.power(x, gamma) * 255).astype(np.uint8)
+
+    def set_blackout(self, active: bool) -> None:
+        self._blackout_target = active
+        if active and self._blackout_phase == 0:
+            self._blackout_phase = 1
+            self._blackout_flash_alpha = 0.0
+
     # ── Boucle de rendu ───────────────────────────────────────────────────────
 
     def run(self):
@@ -128,30 +182,60 @@ class RenderEngine(QThread):
             if raw_a is not None:
                 fa = resize_frame(raw_a, w, h, self._interp_mode)
                 self._frozen_prev_a = None
-                self.deck_a_ready.emit(fa)
             else:
-                fa = black
                 last = self.deck_a.last_frame
                 if last is not None:
                     cached = self._frozen_prev_a
                     if cached is None or cached[0] is not last:
                         resized = resize_frame(last, w, h, self._interp_mode)
                         self._frozen_prev_a = (last, resized)
-                    self.deck_a_ready.emit(self._frozen_prev_a[1])
+                    fa = self._frozen_prev_a[1]
+                else:
+                    fa = black
 
             if raw_b is not None:
                 fb = resize_frame(raw_b, w, h, self._interp_mode)
                 self._frozen_prev_b = None
-                self.deck_b_ready.emit(fb)
             else:
-                fb = black
                 last = self.deck_b.last_frame
                 if last is not None:
                     cached = self._frozen_prev_b
                     if cached is None or cached[0] is not last:
                         resized = resize_frame(last, w, h, self._interp_mode)
                         self._frozen_prev_b = (last, resized)
-                    self.deck_b_ready.emit(self._frozen_prev_b[1])
+                    fb = self._frozen_prev_b[1]
+                else:
+                    fb = black
+
+            ra, ga, ba = self._rgb_a
+            if ra != 1.0 or ga != 1.0 or ba != 1.0:
+                f = fa.astype(np.float32)
+                f[:, :, 0] *= ra; f[:, :, 1] *= ga; f[:, :, 2] *= ba
+                fa = np.clip(f, 0, 255).astype(np.uint8)
+
+            rb, gb, bb = self._rgb_b
+            if rb != 1.0 or gb != 1.0 or bb != 1.0:
+                f = fb.astype(np.float32)
+                f[:, :, 0] *= rb; f[:, :, 1] *= gb; f[:, :, 2] *= bb
+                fb = np.clip(f, 0, 255).astype(np.uint8)
+
+            sat_a = self._sat_a
+            if sat_a != 1.0:
+                hsv = _cv2.cvtColor(fa, _cv2.COLOR_RGB2HSV).astype(np.float32)
+                hsv[:, :, 1] = np.clip(hsv[:, :, 1] * sat_a, 0, 255)
+                fa = _cv2.cvtColor(hsv.astype(np.uint8), _cv2.COLOR_HSV2RGB)
+
+            sat_b = self._sat_b
+            if sat_b != 1.0:
+                hsv = _cv2.cvtColor(fb, _cv2.COLOR_RGB2HSV).astype(np.float32)
+                hsv[:, :, 1] = np.clip(hsv[:, :, 1] * sat_b, 0, 255)
+                fb = _cv2.cvtColor(hsv.astype(np.uint8), _cv2.COLOR_HSV2RGB)
+
+            if raw_a is not None or self._frozen_prev_a is not None:
+                self.deck_a_ready.emit(fa)
+
+            if raw_b is not None or self._frozen_prev_b is not None:
+                self.deck_b_ready.emit(fb)
 
             blend_a = BLEND_MODES.get(self._blend_mode_a, _NORMAL_BLEND)
             blend_b = BLEND_MODES.get(self._blend_mode_b, _NORMAL_BLEND)
@@ -183,6 +267,14 @@ class RenderEngine(QThread):
                 f[:, :, 2] *= b
                 mixed = np.clip(f, 0, 255).astype(np.uint8)
 
+            lut = self._contrast_lut
+            if lut is not None:
+                mixed = lut[mixed]
+
+            blut = self._brightness_lut
+            if blut is not None:
+                mixed = blut[mixed]
+
             if self._strobe_active:
                 half = 0.5 / self._strobe_freq
                 if t0 - self._strobe_phase >= half:
@@ -191,10 +283,52 @@ class RenderEngine(QThread):
                 if not self._strobe_vis:
                     if self._strobe_buf is None or self._strobe_buf.shape != (h, w, 3):
                         self._strobe_buf = np.empty((h, w, 3), dtype=np.uint8)
-                    buf = self._strobe_buf   # local snapshot before main-thread can null it
+                    buf = self._strobe_buf
                     buf[:] = self._strobe_color
                     strobe_blend = BLEND_MODES.get(self._strobe_blend_mode, _NORMAL_BLEND)
                     mixed = strobe_blend(buf, mixed)
+
+            # Blackout: 1=flash in, 2=flash out+black in (crossfade), then hold
+            _FL_STEP = 1.0 / max(1, round(0.05 * ENGINE_FPS))   # ~50ms flash in
+            _XF_STEP = 1.0 / max(1, round(0.1 * ENGINE_FPS))    # ~100ms crossfade flash→black
+            _BK_STEP = 1.0 / max(1, round(0.1 * ENGINE_FPS))    # ~100ms black fade out
+
+            phase = self._blackout_phase
+            if phase == 1:
+                self._blackout_flash_alpha = min(1.0, self._blackout_flash_alpha + _FL_STEP)
+                if self._blackout_flash_alpha >= 1.0:
+                    self._blackout_phase = 2
+            elif phase == 2:
+                self._blackout_flash_alpha = max(0.0, self._blackout_flash_alpha - _XF_STEP)
+                self._blackout_alpha = min(1.0, self._blackout_alpha + _XF_STEP)
+                if self._blackout_alpha >= 1.0:
+                    self._blackout_flash_alpha = 0.0
+                    self._blackout_phase = 3
+
+            if not self._blackout_target and phase >= 2:
+                self._blackout_flash_alpha = 0.0
+                self._blackout_alpha = max(0.0, self._blackout_alpha - _BK_STEP)
+                if self._blackout_alpha <= 0.0:
+                    self._blackout_phase = 0
+            elif not self._blackout_target and phase == 1:
+                self._blackout_flash_alpha = max(0.0, self._blackout_flash_alpha - _FL_STEP)
+                if self._blackout_flash_alpha <= 0.0:
+                    self._blackout_phase = 0
+
+            # Apply: flash color on top of image, then black on top of everything
+            fa = self._blackout_flash_alpha
+            bo = self._blackout_alpha
+            if fa > 0.0 or bo > 0.0:
+                mf = mixed.astype(np.float32)
+                if fa > 0.0:
+                    sr, sg, sb = self._strobe_color
+                    flash = np.empty_like(mf)
+                    flash[:] = (sr, sg, sb)
+                    mf = mf * (1.0 - fa) + flash * fa
+                if bo >= 1.0:
+                    mixed = black
+                else:
+                    mixed = np.clip(mf * (1.0 - bo), 0, 255).astype(np.uint8)
 
             self.frame_ready.emit(mixed)
 

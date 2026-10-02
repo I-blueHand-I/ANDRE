@@ -2,14 +2,16 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QScrollArea, QGridLayout, QFrame
+    QPushButton, QScrollArea, QGridLayout, QFrame, QLineEdit
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QPixmap
 
 from ui.theme import BG_MAIN as _BG_BANK
 from ui.live.styles import _TOGGLE_BTN, _TARGET_BTN
-from ui.live.bank_items import _AnimIcon, _ListRow, _ScanWorker
+from ui.live.bank_items import (
+    _AnimIcon, _ListRow, _ScanWorker, _FolderEntry, _FolderIcon, _FolderRow,
+)
 from engine.constants import SIDE_A, SIDE_B
 from ui.shared_styles import _SCROLLBAR_V
 from ui.shared_widgets import frame_to_pixmap
@@ -24,12 +26,18 @@ class _BankWidget(QWidget):
     def __init__(self, title: str, mode: str = "animation", parent=None):
         super().__init__(parent)
         self._mode               = mode
+        self._title              = title
         self._target             = SIDE_A
         self._last_folder        = ""
+        self._root_folder        = ""
+        self._current_subfolder: str | None = None
         self._preview_anim       = None
         self._preview_idx        = 0
         self._view_mode          = "icon"
+        self._cached_folders:    list = []   # _FolderEntry list from scan
         self._cached_animations: list = []   # last successful scan result
+        self._root_cached_folders:    list = []
+        self._root_cached_animations: list = []
         self._pop_gen            = 0         # incremented to cancel in-flight populate
 
         lay = QVBoxLayout(self)
@@ -38,11 +46,22 @@ class _BankWidget(QWidget):
 
         # ── Header ────────────────────────────────────────────────────────────
         header = QHBoxLayout()
-        title_lbl = QLabel(title)
-        title_lbl.setStyleSheet(
+
+        self._back_btn = QPushButton("←")
+        self._back_btn.setFixedSize(24, 22)
+        self._back_btn.setStyleSheet("""
+            QPushButton { background-color: #3a3a3a; color: white; border: 1px solid #555; font-size: 13px; }
+            QPushButton:hover { background-color: #4a4a4a; }
+        """)
+        self._back_btn.clicked.connect(self._go_back)
+        self._back_btn.setVisible(False)
+        header.addWidget(self._back_btn)
+
+        self._title_lbl = QLabel(title)
+        self._title_lbl.setStyleSheet(
             "color: #888888; font-family: 'terminal grotesque'; font-weight: bold; font-size: 12px;"
         )
-        header.addWidget(title_lbl)
+        header.addWidget(self._title_lbl)
         header.addStretch()
 
         self._btn_icon_view = QPushButton("⊞")
@@ -58,8 +77,23 @@ class _BankWidget(QWidget):
         self._btn_list_view.setStyleSheet(_TOGGLE_BTN)
         self._btn_list_view.clicked.connect(lambda: self._set_view_mode("list"))
 
+        self._search_bar = QLineEdit()
+        self._search_bar.setPlaceholderText("Search…")
+        self._search_bar.setClearButtonEnabled(True)
+        self._search_bar.setFixedHeight(22)
+        self._search_bar.setStyleSheet("""
+            QLineEdit {
+                background: #2a2a2a; color: #cccccc;
+                border: 1px solid #555; padding: 0 4px;
+                font-family: 'terminal grotesque'; font-size: 11px;
+            }
+            QLineEdit:focus { border-color: #888; }
+        """)
+        self._search_bar.textChanged.connect(self._apply_filter)
+
         header.addWidget(self._btn_icon_view)
         header.addWidget(self._btn_list_view)
+        header.addWidget(self._search_bar)
 
         refresh_btn = QPushButton("↺")
         refresh_btn.setFixedSize(24, 22)
@@ -140,10 +174,7 @@ class _BankWidget(QWidget):
         self._view_mode = mode
         self._btn_icon_view.setChecked(mode == "icon")
         self._btn_list_view.setChecked(mode == "list")
-        # Rebuild from cache — no re-scan, no disk I/O
-        self._rebuild_content()
-        if self._cached_animations:
-            self._populate_widgets_batched(self._cached_animations)
+        self._apply_filter()
 
     def _rebuild_content(self):
         self._pop_gen += 1   # cancel any in-flight batched populate
@@ -184,44 +215,63 @@ class _BankWidget(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
-    def _populate_widgets_batched(self, animations: list):
+    def _populate_widgets_batched(self, animations: list,
+                                   folders: list | None = None):
         """Add widgets to the layout in small batches, yielding the event loop between each."""
         self._pop_gen += 1
         current_gen = self._pop_gen
-        items       = list(animations)
+        all_items   = list(folders or []) + list(animations)
+        n_folders   = len(folders) if folders else 0
         pos         = [0]
         grid_rc     = [0, 0]   # [row, col] for icon grid
 
         def _add_batch():
             if current_gen != self._pop_gen:
-                return   # superseded by a newer scan or view switch
+                return
 
-            end = min(pos[0] + _BATCH_SIZE, len(items))
+            end = min(pos[0] + _BATCH_SIZE, len(all_items))
             for i in range(pos[0], end):
-                anim = items[i]
-                if self._view_mode == "icon":
-                    w = _AnimIcon(anim)
-                    w.hovered.connect(self._on_hover)
-                    w.load_clicked.connect(
-                        lambda a: self.load_requested.emit(a, self._target)
-                    )
-                    self._content_layout.addWidget(w, grid_rc[0], grid_rc[1])
-                    grid_rc[1] += 1
-                    if grid_rc[1] >= _COLS:
-                        grid_rc[1] = 0
-                        grid_rc[0] += 1
+                item = all_items[i]
+                is_folder = i < n_folders
+
+                if is_folder:
+                    if self._view_mode == "icon":
+                        w = _FolderIcon(item)
+                        w.hovered.connect(self._on_hover)
+                        w.folder_clicked.connect(self._enter_folder)
+                        self._content_layout.addWidget(w, grid_rc[0], grid_rc[1])
+                        grid_rc[1] += 1
+                        if grid_rc[1] >= _COLS:
+                            grid_rc[1] = 0
+                            grid_rc[0] += 1
+                    else:
+                        w = _FolderRow(item)
+                        w.hovered.connect(self._on_hover)
+                        w.folder_clicked.connect(self._enter_folder)
+                        self._content_layout.addWidget(w)
                 else:
-                    w = _ListRow(anim)
-                    w.hovered.connect(self._on_hover)
-                    w.load_clicked.connect(
-                        lambda a: self.load_requested.emit(a, self._target)
-                    )
-                    self._content_layout.addWidget(w)
+                    if self._view_mode == "icon":
+                        w = _AnimIcon(item)
+                        w.hovered.connect(self._on_hover)
+                        w.load_clicked.connect(
+                            lambda a: self.load_requested.emit(a, self._target)
+                        )
+                        self._content_layout.addWidget(w, grid_rc[0], grid_rc[1])
+                        grid_rc[1] += 1
+                        if grid_rc[1] >= _COLS:
+                            grid_rc[1] = 0
+                            grid_rc[0] += 1
+                    else:
+                        w = _ListRow(item)
+                        w.hovered.connect(self._on_hover)
+                        w.load_clicked.connect(
+                            lambda a: self.load_requested.emit(a, self._target)
+                        )
+                        self._content_layout.addWidget(w)
 
             pos[0] = end
 
-            if pos[0] >= len(items):
-                # All done — finalise layout
+            if pos[0] >= len(all_items):
                 if self._view_mode == "icon":
                     self._content_layout.setRowStretch(grid_rc[0] + 1, 1)
                 else:
@@ -238,6 +288,23 @@ class _BankWidget(QWidget):
         self._btn_deck_a.setChecked(deck == SIDE_A)
         self._btn_deck_b.setChecked(deck == SIDE_B)
 
+    # ── Folder navigation ────────────────────────────────────────────────────
+
+    def _enter_folder(self, folder_entry):
+        self._current_subfolder = str(folder_entry.path)
+        self._back_btn.setVisible(True)
+        self._title_lbl.setText(f"{self._title} / {folder_entry.name}")
+        self.scan(self._current_subfolder)
+
+    def _go_back(self):
+        self._current_subfolder = None
+        self._last_folder = self._root_folder
+        self._back_btn.setVisible(False)
+        self._title_lbl.setText(self._title)
+        self._cached_folders = self._root_cached_folders
+        self._cached_animations = self._root_cached_animations
+        self._apply_filter()
+
     # ── Scan (async) ──────────────────────────────────────────────────────────
 
     def cleanup(self):
@@ -248,10 +315,13 @@ class _BankWidget(QWidget):
                 worker.terminate()
 
     def scan(self, folder_path: str):
+        if self._current_subfolder is None:
+            self._root_folder = folder_path
         self._last_folder = folder_path
         self._scan_gen += 1
         gen = self._scan_gen
-        self._cached_animations = []   # invalidate cache while new scan runs
+        self._cached_animations = []
+        self._cached_folders = []
 
         self._rebuild_content()
 
@@ -265,24 +335,42 @@ class _BankWidget(QWidget):
 
         self._add_placeholder("Chargement…")
 
-        worker = _ScanWorker(str(folder), self._mode)
+        at_root = self._current_subfolder is None
+        worker = _ScanWorker(str(folder), self._mode, detect_folders=at_root)
         self._scan_workers.add(worker)
-        worker.scan_done.connect(lambda anims: self._on_scan_done(anims, gen))
+        worker.scan_done.connect(lambda f, i: self._on_scan_done(f, i, gen))
         worker.finished.connect(lambda: self._scan_workers.discard(worker))
         worker.start()
 
-    def _on_scan_done(self, animations: list, gen: int):
+    def _on_scan_done(self, folders: list, animations: list, gen: int):
         if gen != self._scan_gen:
             return
 
+        self._cached_folders = folders
         self._cached_animations = animations
+        if self._current_subfolder is None:
+            self._root_cached_folders = folders
+            self._root_cached_animations = animations
+        self._apply_filter()
+
+    def _apply_filter(self):
+        query = self._search_bar.text().strip().lower()
+        if query:
+            filtered_folders: list = []
+            filtered_items = [a for a in self._cached_animations if query in a.name.lower()]
+        else:
+            filtered_folders = list(self._cached_folders)
+            filtered_items = list(self._cached_animations)
+
         self._rebuild_content()
-
-        if not animations:
-            self._add_placeholder("Aucune animation trouvée")
-            return
-
-        self._populate_widgets_batched(animations)
+        if not filtered_folders and not filtered_items:
+            msg = "Aucun résultat" if query else (
+                "Aucune animation trouvée" if self._mode != "video"
+                else "Aucune vidéo trouvée"
+            )
+            self._add_placeholder(msg)
+        else:
+            self._populate_widgets_batched(filtered_items, filtered_folders)
 
     # ── Preview hover ─────────────────────────────────────────────────────────
 
@@ -308,12 +396,14 @@ class _BankWidget(QWidget):
 
     def _advance_preview(self):
         anim = self._preview_anim
-        if anim is None:
+        if anim is None or anim.frame_count <= 0:
             return
         if hasattr(anim, 'get_preview_frame'):
             frame = anim.get_preview_frame(self._preview_idx)
         else:
             frame = anim.get_frame(self._preview_idx)
+        if frame is None:
+            return
         self._preview_idx = (self._preview_idx + 1) % anim.frame_count
 
         px = frame_to_pixmap(frame).scaled(

@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QTabWidget,
-    QPushButton, QSlider, QFrame
+    QPushButton, QSlider, QFrame, QGridLayout
 )
 from PySide6.QtCore import Qt, Signal
 
@@ -11,10 +11,11 @@ from ui.shared_widgets import ColorDial
 from ui.keybind import (
     KeyBindButton, Action, ActionDef,
     COLORS_REGISTRY, GLOBAL_RIGHT_REGISTRY,
-    EDIT_LEFT_REGISTRY, EDIT_RIGHT_REGISTRY,
+    EDIT_LEFT_REGISTRY, EDIT_TOOLS_REGISTRY, EDIT_RIGHT_REGISTRY,
 )
 from ui.live.styles import _HSLIDER, _STROBE_BTN as _LIVE_STROBE_BTN
 from engine.constants import SIDE_A, SIDE_B
+from engine.blend_modes import BLEND_MODES
 
 _DECK_PLAY_PAUSE_ACTION = {
     SIDE_A: Action.DECK_A_PLAY_PAUSE,
@@ -58,6 +59,8 @@ class MixetteTab(QWidget):
     midi_learn_requested = Signal(str)
     rgb_changed          = Signal(float, float, float)
     hsv_changed          = Signal(bool, float, float, float)
+    contrast_changed     = Signal(float)      # 0.0 = neutral, 1.0 = max
+    brightness_changed   = Signal(float)      # 0.0 = neutral, 1.0 = max
     key_bind_changed     = Signal(str, str)   # action, key_seq
 
     def __init__(self, config):
@@ -92,6 +95,8 @@ class MixetteTab(QWidget):
         self._hsv_panel = HSVPanel()
         self._rgb_panel = RGBPanel()
         self._hsv_panel.hsv_changed.connect(self.hsv_changed)
+        self._hsv_panel.contrast_changed.connect(self.contrast_changed)
+        self._hsv_panel.brightness_changed.connect(self.brightness_changed)
         self._rgb_panel.rgb_changed.connect(self.rgb_changed)
         self._hsv_panel.midi_learn_requested.connect(self.midi_learn_requested)
         self._rgb_panel.midi_learn_requested.connect(self.midi_learn_requested)
@@ -160,6 +165,9 @@ class MixetteTab(QWidget):
 
         right = QVBoxLayout()
         right.setSpacing(16)
+        for action_def in EDIT_TOOLS_REGISTRY:
+            right.addWidget(self._make_key_bind_row(action_def))
+        right.addSpacing(8)
         for action_def in EDIT_RIGHT_REGISTRY:
             right.addWidget(self._make_key_bind_row(action_def))
         right.addStretch()
@@ -193,7 +201,24 @@ class MixetteTab(QWidget):
         lay.addWidget(sep)
 
         lay.addWidget(self._make_midi_row("CROSSFADER", "CROSSFADER"))
+        lay.addWidget(self._make_midi_row("BLACKOUT", "BLACKOUT"))
         lay.addStretch()
+        return w
+
+    # ── Deck RGB row ──────────────────────────────────────────────────────────
+
+    def _make_deck_rgb_row(self, deck: str) -> QWidget:
+        w = QWidget()
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(_label("RGB", size=14))
+        lay.addStretch()
+        for color, channel in (("#cc3333", "RED"), ("#33bb33", "GREEN"), ("#3366cc", "BLUE"), ("#bbbbbb", "SAT")):
+            lay.addWidget(_label(channel, color="#666666", size=10), alignment=Qt.AlignVCenter)
+            lay.addSpacing(4)
+            lay.addWidget(self._make_learn_btn(f"{channel}_{deck}"), alignment=Qt.AlignVCenter)
+            lay.addSpacing(12)
         return w
 
     # ── Strobe rows ───────────────────────────────────────────────────────────
@@ -277,10 +302,22 @@ class MixetteTab(QWidget):
         lay = QVBoxLayout()
         lay.setSpacing(20)
         lay.addWidget(_label(f"DECK {deck}", color="#aaaaaa", size=13))
-        lay.addWidget(self._make_midi_row("BLEND MODE",  f"BLEND_{deck}"))
         lay.addWidget(self._make_midi_row("FPS",         f"FPS_{deck}"))
         lay.addWidget(self._make_midi_key_row("PLAY/PAUSE", f"PLAY_PAUSE_{deck}", _DECK_PLAY_PAUSE_ACTION[deck]))
         lay.addWidget(self._make_midi_key_row("CUE",        f"CUE_{deck}",        _DECK_CUE_ACTION[deck],        hold=True))
+
+        lay.addSpacing(8)
+        lay.addWidget(self._make_deck_rgb_row(deck))
+
+        lay.addSpacing(8)
+        lay.addWidget(_label("BLEND MODES", color="#666666", size=11))
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        modes = list(BLEND_MODES.keys())
+        for i, mode in enumerate(modes):
+            row, col = divmod(i, 2)
+            grid.addWidget(self._make_midi_row(mode, f"BLEND_{deck}_{mode}"), row, col)
+        lay.addLayout(grid)
         return lay
 
     def _make_midi_key_row(self, label: str, midi_name: str, action_name: str, hold: bool = False) -> QWidget:

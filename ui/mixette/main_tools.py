@@ -105,7 +105,9 @@ class HSVPanel(_MidiPanel):
     VALUE: slider 0–255  (0 = noir, 255 = luminosité native)
     """
 
-    hsv_changed = Signal(bool, float, float, float)  # hue_on, hue_deg, sat, val
+    hsv_changed        = Signal(bool, float, float, float)  # hue_on, hue_deg, sat, val
+    contrast_changed   = Signal(float)                      # 0.0 = neutral, 1.0 = max
+    brightness_changed = Signal(float)                      # 0.0 = neutral, 1.0 = max
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -118,10 +120,18 @@ class HSVPanel(_MidiPanel):
         self._slider_h = self._add_hue_row(lay)
         self._slider_s = self._add_row(lay, "SATURATION", "#444444", "#888888")
         self._slider_v = self._add_row(lay, "VALUE",      "#444444", "#888888")
+        self._slider_contrast = self._add_contrast_row(lay)
+        self._slider_brightness = self._add_brightness_row(lay)
         lay.addStretch(1)
         self._slider_h.valueChanged.connect(self._emit)
         self._slider_s.valueChanged.connect(self._emit)
         self._slider_v.valueChanged.connect(self._emit)
+        self._slider_contrast.valueChanged.connect(
+            lambda v: self.contrast_changed.emit(v / 255.0)
+        )
+        self._slider_brightness.valueChanged.connect(
+            lambda v: self.brightness_changed.emit(v / 255.0)
+        )
 
     def _add_hue_row(self, parent_lay: QVBoxLayout) -> QSlider:
         w = QWidget()
@@ -181,6 +191,48 @@ class HSVPanel(_MidiPanel):
         slider.setRange(0, 255)
         slider.setValue(255)
         slider.setStyleSheet(_slider_style(track, fill))
+        lay.addWidget(slider)
+
+        parent_lay.addWidget(w)
+        return slider
+
+    def _add_contrast_row(self, parent_lay: QVBoxLayout) -> QSlider:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(5)
+
+        header = QHBoxLayout()
+        header.addWidget(_label("CONTRAST"))
+        header.addStretch()
+        header.addWidget(self._make_learn_btn("CONTRAST"))
+        lay.addLayout(header)
+
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(0, 255)
+        slider.setValue(0)
+        slider.setStyleSheet(_slider_style("#444444", "#888888"))
+        lay.addWidget(slider)
+
+        parent_lay.addWidget(w)
+        return slider
+
+    def _add_brightness_row(self, parent_lay: QVBoxLayout) -> QSlider:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(5)
+
+        header = QHBoxLayout()
+        header.addWidget(_label("BRIGHTNESS"))
+        header.addStretch()
+        header.addWidget(self._make_learn_btn("BRIGHTNESS"))
+        lay.addLayout(header)
+
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(0, 255)
+        slider.setValue(0)
+        slider.setStyleSheet(_slider_style("#444444", "#888888"))
         lay.addWidget(slider)
 
         parent_lay.addWidget(w)

@@ -13,6 +13,12 @@ config.json
 build/
 dist/
 *.spec
+pyi_rth_cv2_fix.py
+
+# macOS build assets
+ANDRE.icns
+ANDRE.ico
+ANDRE.iconset/
 
 # Design assets (large binaries)
 *.ai
